@@ -141,7 +141,10 @@ fn open_in_file_explorer(path: &std::path::Path) {
 fn open_in_file_explorer(path: &std::path::Path) {
     #[cfg(target_os = "macos")]
     {
-        let _ = std::process::Command::new("open").arg("-R").arg(path).spawn();
+        let _ = std::process::Command::new("open")
+            .arg("-R")
+            .arg(path)
+            .spawn();
     }
     #[cfg(target_os = "linux")]
     {
@@ -1384,7 +1387,9 @@ impl RealmHoundApp {
         {
             rfd::MessageDialog::new()
                 .set_title("RealmHound")
-                .set_description(format!("Restart failed and RealmHound must close:\n\n{reason}"))
+                .set_description(format!(
+                    "Restart failed and RealmHound must close:\n\n{reason}"
+                ))
                 .set_level(rfd::MessageLevel::Error)
                 .set_buttons(rfd::MessageButtons::Ok)
                 .show();
@@ -2152,7 +2157,9 @@ impl RealmHoundApp {
                                         ui.label(msg);
                                     });
                             } else {
-                                ui.label("An unknown error occurred while initializing packet capture.");
+                                ui.label(
+                                    "An unknown error occurred while initializing packet capture.",
+                                );
                             }
 
                             ui.add_space(12.0);
@@ -2164,7 +2171,8 @@ impl RealmHoundApp {
                                 {
                                     if shadcn.btn(ui, "Copy Brew Command").clicked() {
                                         ui.output_mut(|o| {
-                                            o.copied_text = "brew install --cask wireshark-chmodbpf".to_string()
+                                            o.copied_text =
+                                                "brew install --cask wireshark-chmodbpf".to_string()
                                         });
                                     }
                                 }

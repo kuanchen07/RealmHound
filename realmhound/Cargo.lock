@@ -12,6 +12,7 @@ dependencies = [
  "eframe",
  "egui",
  "egui-shadcn",
+ "fs2",
  "image",
  "puffin",
  "puffin_egui",
