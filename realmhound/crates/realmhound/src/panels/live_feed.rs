@@ -3407,6 +3407,14 @@ impl LiveFeedPanel {
         let prev_item_spacing_y = ui.spacing().item_spacing.y;
         ui.spacing_mut().item_spacing.y = 0.0;
 
+        // Missing assets warning: inform the user why sprites show hex codes
+        if !realmhound_core::assets::get_asset_manager().is_loaded() {
+            let text = "Game assets not loaded - in-game sprites show hex IDs. Locate RotMG files in Settings -> Appearance -> Game Assets";
+            ui.add_space(3.0);
+            self.render_pinned_warning_row(ui, sprite_renderer, text, PinnedTooltip::None);
+            rendered_any = true;
+        }
+
         // 1. Daily login calendar (fully automatic: last day of the month).
         if self.season_warnings.daily_calendar_enabled {
             let target = season::daily_calendar_end(now);

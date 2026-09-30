@@ -498,6 +498,32 @@ impl SpriteRenderer {
         });
     }
 
+    /// Reset atlas and sprite caches so atlases can be reloaded.
+    /// Useful after extracting new assets or changing the asset directory.
+    pub fn reset_atlas_loading(&mut self) {
+        self.textures.clear();
+        self.atlas_dimensions.clear();
+        self.atlas_images.clear();
+        self.load_state = AtlasLoadState::NotStarted;
+        self.atlas_rx = None;
+        self.atlases_pending = 0;
+        self.glow_cache.clear();
+        self.char_glow_cache.clear();
+        self.dye_cache.clear();
+        self.char_dye_cache.clear();
+        self.outlined_cache.clear();
+        self.outlined_dir_cache.clear();
+        self.outlined_dir_glow_cache.clear();
+        self.outlined_embedded_cache.clear();
+        self.outlined_sheet_cache.clear();
+        self.outlined_full_cache.clear();
+        self.outlined_fit_cache.clear();
+        self.content_offsets.clear();
+        self.trim_cache.clear();
+        self.collection_icon_texture = None;
+        self.collection_icon_failed = false;
+    }
+
     /// Poll for loaded atlas data and create textures.
     /// Call this every frame when load_state is Loading.
     /// Returns true when all atlases are loaded.

@@ -91,6 +91,10 @@ pub struct Settings {
     #[serde(default)]
     pub assets_stamp: Option<u64>,
 
+    /// Optional user-specified path to RotMG directory or resources.assets file.
+    #[serde(default)]
+    pub custom_rotmg_path: Option<PathBuf>,
+
     /// Main account settings for multi-client isolation.
     #[serde(default)]
     pub account: AccountSettings,
@@ -2258,6 +2262,7 @@ impl Default for Settings {
             loot_tracking: LootTrackingSettings::default(),
             chat: ChatSettings::default(),
             assets_stamp: None,
+            custom_rotmg_path: None,
             account: AccountSettings::default(),
             treasury: TreasurySettings::default(),
             characters: CharactersSettings::default(),
@@ -2912,6 +2917,20 @@ mod tests {
         let json = serde_json::to_string_pretty(&settings).unwrap();
         let loaded: Settings = serde_json::from_str(&json).unwrap();
         assert_eq!(loaded.assets_stamp, Some(1738800000));
+    }
+
+    #[test]
+    fn test_custom_rotmg_path_roundtrip() {
+        let mut settings = Settings::default();
+        assert!(settings.custom_rotmg_path.is_none());
+
+        settings.custom_rotmg_path = Some(PathBuf::from("/Applications/RotMG Exalt.app"));
+        let json = serde_json::to_string_pretty(&settings).unwrap();
+        let loaded: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            loaded.custom_rotmg_path,
+            Some(PathBuf::from("/Applications/RotMG Exalt.app"))
+        );
     }
 
     #[test]

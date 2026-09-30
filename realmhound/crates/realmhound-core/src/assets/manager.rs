@@ -3623,11 +3623,17 @@ impl AssetManager {
     /// Extract assets from the game's resources.assets file.
     ///
     /// Returns Ok(()) if extraction succeeded, or an error message.
+    /// Extract assets from the game's resources.assets file.
+    ///
+    /// Returns Ok(()) if extraction succeeded, or an error message.
     pub fn extract_assets(&self) -> Result<(), String> {
-        // Find resources.assets
         let resources_path = find_resources_assets()
             .ok_or_else(|| "Could not find resources.assets - is RotMG installed?".to_string())?;
+        self.extract_from_path(&resources_path)
+    }
 
+    /// Extract assets from a specific resources.assets file path.
+    pub fn extract_from_path(&self, resources_path: &Path) -> Result<(), String> {
         tracing::info!("Found resources.assets at: {:?}", resources_path);
 
         // Determine output directory
@@ -3647,7 +3653,7 @@ impl AssetManager {
         // Extract
         let mut extractor = UnityExtractor::new();
         let result = extractor
-            .extract(&resources_path, &output_dir)
+            .extract(resources_path, &output_dir)
             .map_err(|e| format!("Extraction failed: {}", e))?;
 
         tracing::info!(
@@ -3658,14 +3664,12 @@ impl AssetManager {
             result.tiles
         );
 
-        // Set the assets directory if not already set
-        if self.assets_dir.read().unwrap().is_none() {
-            self.set_assets_dir(&output_dir);
-        }
+        // Set the assets directory
+        self.set_assets_dir(&output_dir);
 
         // Save the resources.assets stamp so we can detect future game updates.
         // Note: live_settings will be patched in by initialize() after this returns.
-        if let Some(stamp) = get_resources_assets_stamp() {
+        if let Some(stamp) = get_resources_assets_stamp_for(resources_path) {
             Self::save_assets_stamp(stamp, None);
         }
 
@@ -3697,18 +3701,33 @@ impl AssetManager {
         &self,
         live_settings: Option<&std::sync::Arc<std::sync::RwLock<crate::settings::Settings>>>,
     ) -> Result<(), String> {
+        let custom_resources_path = live_settings.and_then(|s| {
+            s.read()
+                .ok()
+                .and_then(|s| s.custom_rotmg_path.clone())
+                .and_then(|p| super::unity::resolve_resources_assets_path(&p))
+        });
+
         // Try to find existing assets first
         if let Some(dir) = find_assets_dir() {
             self.set_assets_dir(&dir);
 
             // Check if assets are stale (game updated since last extraction)
-            if self.assets_are_stale() {
+            if self.assets_are_stale_with_custom(custom_resources_path.as_deref()) {
                 tracing::info!(
                     "[ASSETS] Game update detected - resources.assets changed, re-extracting"
                 );
-                self.extract_assets()?;
+                if let Some(ref path) = custom_resources_path {
+                    self.extract_from_path(path)?;
+                } else {
+                    self.extract_assets()?;
+                }
                 // Update live settings so on_exit won't overwrite the stamp
-                if let Some(stamp) = get_resources_assets_stamp() {
+                if let Some(stamp) = custom_resources_path
+                    .as_deref()
+                    .and_then(get_resources_assets_stamp_for)
+                    .or_else(get_resources_assets_stamp)
+                {
                     Self::save_assets_stamp(stamp, live_settings);
                 }
                 return Ok(());
@@ -3729,8 +3748,16 @@ impl AssetManager {
                     .unwrap_or(false);
                 if needs_update {
                     tracing::info!("[ASSETS] Re-extracting for ObjectID.list format update");
-                    self.extract_assets()?;
-                    if let Some(stamp) = get_resources_assets_stamp() {
+                    if let Some(ref path) = custom_resources_path {
+                        self.extract_from_path(path)?;
+                    } else {
+                        self.extract_assets()?;
+                    }
+                    if let Some(stamp) = custom_resources_path
+                        .as_deref()
+                        .and_then(get_resources_assets_stamp_for)
+                        .or_else(get_resources_assets_stamp)
+                    {
                         Self::save_assets_stamp(stamp, live_settings);
                     }
                 }
@@ -3740,10 +3767,25 @@ impl AssetManager {
 
         // Need to extract
         if self.needs_extraction() {
-            self.extract_assets()?;
+            if let Some(ref path) = custom_resources_path {
+                self.extract_from_path(path)?;
+            } else {
+                self.extract_assets()?;
+            }
             // Update live settings so on_exit won't overwrite the stamp
-            if let Some(stamp) = get_resources_assets_stamp() {
+            if let Some(stamp) = custom_resources_path
+                .as_deref()
+                .and_then(get_resources_assets_stamp_for)
+                .or_else(get_resources_assets_stamp)
+            {
                 Self::save_assets_stamp(stamp, live_settings);
+            }
+        } else if self.assets_dir.read().unwrap().is_none() {
+            // Assets directory already contains valid extracted files, but wasn't set yet.
+            let dir = default_assets_dir();
+            if dir.join("ObjectID.list").exists() {
+                self.set_assets_dir(&dir);
+                self.try_load();
             }
         }
 
@@ -3752,11 +3794,16 @@ impl AssetManager {
 
     /// Check if extracted assets are stale by comparing the current
     /// `resources.assets` modified time against the stamp saved in settings.
-    ///
-    /// Returns true when the game has been updated since assets were last
-    /// extracted (i.e., a re-extraction is needed).
     pub fn assets_are_stale(&self) -> bool {
-        let current_stamp = match get_resources_assets_stamp() {
+        self.assets_are_stale_with_custom(None)
+    }
+
+    /// Check if extracted assets are stale using an optional custom `resources.assets` path.
+    pub fn assets_are_stale_with_custom(&self, custom_path: Option<&Path>) -> bool {
+        let current_stamp = match custom_path
+            .and_then(get_resources_assets_stamp_for)
+            .or_else(get_resources_assets_stamp)
+        {
             Some(s) => s,
             None => {
                 tracing::debug!("[ASSETS] Cannot determine resources.assets stamp");
@@ -3958,13 +4005,33 @@ pub fn default_assets_dir() -> PathBuf {
 pub fn default_asset_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
 
+    // Primary default assets dir (handles Windows LocalAppData and macOS Application Support)
+    let primary = default_assets_dir();
+    dirs.push(primary);
+
     // Current working directory
-    dirs.push(PathBuf::from("assets"));
+    let cwd_assets = PathBuf::from("assets");
+    if !dirs.contains(&cwd_assets) {
+        dirs.push(cwd_assets);
+    }
 
     // Executable directory
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(exe_dir) = exe_path.parent() {
-            dirs.push(exe_dir.join("assets"));
+            let exe_assets = exe_dir.join("assets");
+            if !dirs.contains(&exe_assets) {
+                dirs.push(exe_assets);
+            }
+
+            // On macOS app bundles: RealmHound.app/Contents/MacOS/RealmHound
+            // Resources are at RealmHound.app/Contents/Resources/assets
+            #[cfg(target_os = "macos")]
+            if let Some(contents_dir) = exe_dir.parent() {
+                let bundle_res_assets = contents_dir.join("Resources").join("assets");
+                if !dirs.contains(&bundle_res_assets) {
+                    dirs.push(bundle_res_assets);
+                }
+            }
         }
     }
 
@@ -3972,15 +4039,38 @@ pub fn default_asset_dirs() -> Vec<PathBuf> {
     #[cfg(target_os = "windows")]
     {
         if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
-            dirs.push(
-                PathBuf::from(local_app_data)
-                    .join("RealmHound")
-                    .join("assets"),
-            );
+            let p = PathBuf::from(local_app_data)
+                .join("RealmHound")
+                .join("assets");
+            if !dirs.contains(&p) {
+                dirs.push(p);
+            }
+        }
+    }
+
+    // Application Support on macOS
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(support) = dirs::data_local_dir() {
+            let p = support.join("RealmHound").join("assets");
+            if !dirs.contains(&p) {
+                dirs.push(p);
+            }
         }
     }
 
     dirs
+}
+
+/// Get the modified-time stamp of a specific `resources.assets` file.
+pub fn get_resources_assets_stamp_for(path: &Path) -> Option<u64> {
+    let metadata = std::fs::metadata(path).ok()?;
+    let modified = metadata.modified().ok()?;
+    let stamp = modified
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_secs();
+    Some(stamp)
 }
 
 /// Get the modified-time stamp of the game's `resources.assets` file.
@@ -3989,13 +4079,7 @@ pub fn default_asset_dirs() -> Vec<PathBuf> {
 /// or None if the file can't be found or its metadata can't be read.
 pub fn get_resources_assets_stamp() -> Option<u64> {
     let path = find_resources_assets()?;
-    let metadata = std::fs::metadata(&path).ok()?;
-    let modified = metadata.modified().ok()?;
-    let stamp = modified
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()?
-        .as_secs();
-    Some(stamp)
+    get_resources_assets_stamp_for(&path)
 }
 
 /// Find the first valid assets directory from default locations.

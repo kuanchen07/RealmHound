@@ -695,6 +695,8 @@ pub struct RealmHoundApp {
     delete_confirm_target: Option<realmhound_core::account::AccountKey>,
     /// Inline error shown when an account deletion fails.
     delete_error: Option<String>,
+    /// Status message from an asset operation: (is_error, message).
+    asset_status: Option<(bool, String)>,
 }
 
 /// Sub-tabs of the Sound settings panel, splitting the previously crowded
@@ -828,7 +830,7 @@ impl RealmHoundApp {
         egui_ctx.set_fonts(fonts);
 
         // Initialize assets (extracts from game if needed)
-        match get_asset_manager().initialize(Some(&settings)) {
+        let asset_init_status = match get_asset_manager().initialize(Some(&settings)) {
             Ok(_) => {
                 let stats = get_asset_manager().stats();
                 tracing::info!(
@@ -837,9 +839,18 @@ impl RealmHoundApp {
                     stats.tiles_loaded,
                     stats.sprites_loaded
                 );
+                if !get_asset_manager().is_loaded() {
+                    Some((
+                        true,
+                        "RotMG game files not found. In-game sprites will display as hex codes until located in Settings -> Appearance -> Game Assets.".to_string(),
+                    ))
+                } else {
+                    None
+                }
             }
             Err(e) => {
                 tracing::warn!("[ASSETS] Failed to load assets: {}", e);
+                Some((true, format!("Failed to load assets: {e}")))
             }
         };
 
@@ -1125,6 +1136,7 @@ impl RealmHoundApp {
             discovery_error: None,
             delete_confirm_target: None,
             delete_error: None,
+            asset_status: asset_init_status,
         };
 
         // Apply persisted settings to panels. (Volume is applied by the audio
@@ -2661,6 +2673,213 @@ impl RealmHoundApp {
                 RichText::new("Show a confirmation dialog when closing the RealmHound window.")
                     .small()
                     .weak(),
+            );
+        });
+
+        ui.add_space(12.0);
+
+        shadcn.card(ui, "appearance_game_assets", "Game Assets & Sprites", |ui| {
+            let asset_mgr = realmhound_core::assets::get_asset_manager();
+            let is_loaded = asset_mgr.is_loaded();
+            let assets_dir = asset_mgr.assets_dir();
+
+            // Status indicator
+            if is_loaded {
+                let stats = asset_mgr.stats();
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new("●")
+                            .color(egui::Color32::from_rgb(74, 222, 128))
+                            .strong(),
+                    );
+                    ui.label(
+                        RichText::new(format!(
+                            "Game Assets Loaded ({} objects, {} sprites)",
+                            stats.objects_loaded, stats.sprites_loaded
+                        ))
+                        .strong(),
+                    );
+                });
+            } else {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new("●")
+                            .color(egui::Color32::from_rgb(239, 68, 68))
+                            .strong(),
+                    );
+                    ui.label(
+                        RichText::new("Assets Not Loaded - In-game sprites show hex IDs")
+                            .color(egui::Color32::from_rgb(239, 68, 68))
+                            .strong(),
+                    );
+                });
+            }
+
+            ui.add_space(4.0);
+
+            if let Some(ref dir) = assets_dir {
+                ui.label(
+                    RichText::new(format!("Extracted assets location: {}", dir.display()))
+                        .small()
+                        .weak(),
+                );
+            }
+
+            let custom_path = self
+                .settings
+                .read()
+                .ok()
+                .and_then(|s| s.custom_rotmg_path.clone());
+
+            let mut reset_custom_clicked = false;
+            if let Some(ref path) = custom_path {
+                ui.add_space(2.0);
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(format!("Custom RotMG path: {}", path.display()))
+                            .small()
+                            .weak(),
+                    );
+                    if ui.small_button("Reset").clicked() {
+                        reset_custom_clicked = true;
+                    }
+                });
+            }
+
+            if reset_custom_clicked {
+                if let Ok(mut s) = self.settings.write() {
+                    s.custom_rotmg_path = None;
+                    s.save();
+                }
+                self.asset_status = Some((
+                    false,
+                    "Reset RotMG path to default search locations.".to_string(),
+                ));
+            }
+
+            if let Some((is_error, ref msg)) = self.asset_status {
+                ui.add_space(4.0);
+                let color = if is_error {
+                    egui::Color32::from_rgb(239, 68, 68)
+                } else {
+                    egui::Color32::from_rgb(74, 222, 128)
+                };
+                ui.label(RichText::new(msg).color(color).small());
+            }
+
+            ui.add_space(8.0);
+
+            let mut new_path_to_try: Option<std::path::PathBuf> = None;
+            let mut reextract_needed = false;
+
+            ui.horizontal_wrapped(|ui| {
+                if shadcn.btn(ui, "📂 Locate RotMG Folder / App").clicked() {
+                    if let Some(folder) = rfd::FileDialog::new().pick_folder() {
+                        new_path_to_try = Some(folder);
+                    }
+                }
+
+                if shadcn.btn(ui, "📄 Select resources.assets").clicked() {
+                    if let Some(file) = rfd::FileDialog::new()
+                        .add_filter("Unity Assets", &["assets"])
+                        .pick_file()
+                    {
+                        new_path_to_try = Some(file);
+                    }
+                }
+
+                if shadcn.btn(ui, "🔄 Re-extract Assets").clicked() {
+                    reextract_needed = true;
+                }
+            });
+
+            // Handle locating new path
+            if let Some(picked) = new_path_to_try {
+                if let Some(res_path) = realmhound_core::assets::resolve_resources_assets_path(&picked) {
+                    tracing::info!("[ASSETS] User selected RotMG path: {:?}", res_path);
+                    match asset_mgr.extract_from_path(&res_path) {
+                        Ok(()) => {
+                            if let Ok(mut s) = self.settings.write() {
+                                s.custom_rotmg_path = Some(picked.clone());
+                                if let Some(stamp) = realmhound_core::assets::get_resources_assets_stamp_for(&res_path) {
+                                    s.assets_stamp = Some(stamp);
+                                }
+                                s.save();
+                            }
+                            self.sprite_renderer.reset_atlas_loading();
+                            self.sprite_renderer.load_overlay_sprites(ui.ctx());
+                            let stats = asset_mgr.stats();
+                            self.asset_status = Some((
+                                false,
+                                format!(
+                                    "Successfully extracted assets ({} objects, {} sprites)!",
+                                    stats.objects_loaded, stats.sprites_loaded
+                                ),
+                            ));
+                        }
+                        Err(e) => {
+                            self.asset_status = Some((true, format!("Failed to extract assets: {e}")));
+                        }
+                    }
+                } else {
+                    self.asset_status = Some((
+                        true,
+                        format!(
+                            "Could not find resources.assets in {}. Please select the game folder, RotMG Exalt.app, or resources.assets.",
+                            picked.display()
+                        ),
+                    ));
+                }
+            }
+
+            // Handle manual re-extraction
+            if reextract_needed {
+                let custom_res = custom_path
+                    .as_deref()
+                    .and_then(realmhound_core::assets::resolve_resources_assets_path);
+                let extract_res = if let Some(ref res_path) = custom_res {
+                    asset_mgr.extract_from_path(res_path)
+                } else {
+                    asset_mgr.extract_assets()
+                };
+
+                match extract_res {
+                    Ok(()) => {
+                        let stamp = custom_res
+                            .as_deref()
+                            .and_then(realmhound_core::assets::get_resources_assets_stamp_for)
+                            .or_else(realmhound_core::assets::get_resources_assets_stamp);
+                        if let Some(stamp) = stamp {
+                            if let Ok(mut s) = self.settings.write() {
+                                s.assets_stamp = Some(stamp);
+                                s.save();
+                            }
+                        }
+                        self.sprite_renderer.reset_atlas_loading();
+                        self.sprite_renderer.load_overlay_sprites(ui.ctx());
+                        let stats = asset_mgr.stats();
+                        self.asset_status = Some((
+                            false,
+                            format!(
+                                "Successfully re-extracted assets ({} objects, {} sprites)!",
+                                stats.objects_loaded, stats.sprites_loaded
+                            ),
+                        ));
+                    }
+                    Err(e) => {
+                        self.asset_status = Some((true, format!("Re-extraction failed: {e}")));
+                    }
+                }
+            }
+
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new(
+                    "RealmHound extracts item sprites and XML definitions from RotMG's resources.assets file. \
+                     If sprites are missing or show hex IDs, use the buttons above to locate your game installation."
+                )
+                .small()
+                .weak(),
             );
         });
 

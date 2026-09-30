@@ -27,6 +27,8 @@ mod text_asset;
 mod texture2d;
 pub mod xml_parser;
 
-pub use extractor::{find_resources_assets, ExtractionResult, UnityExtractor};
+pub use extractor::{
+    find_resources_assets, resolve_resources_assets_path, ExtractionResult, UnityExtractor,
+};
 pub use file_header::FileHeader;
 pub use xml_parser::generate_asset_lists;

@@ -223,20 +223,84 @@ impl Default for UnityExtractor {
     }
 }
 
+/// Helper to resolve a `resources.assets` file from any user-provided path.
+///
+/// Handles:
+/// - Direct path to `resources.assets`
+/// - Path to an `.app` bundle (e.g. `RotMG Exalt.app`)
+/// - Path to the installation folder (e.g. `Production/` or `RealmOfTheMadGod/`)
+pub fn resolve_resources_assets_path<P: AsRef<Path>>(input: P) -> Option<PathBuf> {
+    let p = input.as_ref();
+    if !p.exists() {
+        return None;
+    }
+
+    if p.is_file() {
+        if p.file_name().and_then(|n| n.to_str()) == Some("resources.assets") {
+            return Some(p.to_path_buf());
+        }
+        return None;
+    }
+
+    // It's a directory: check common direct subpaths
+    let candidates = [
+        p.join("resources.assets"),
+        p.join("Contents/Resources/Data/resources.assets"),
+        p.join("Data/resources.assets"),
+        p.join("RotMG Exalt_Data/resources.assets"),
+        p.join("RotMG Exalt Launcher_Data/resources.assets"),
+    ];
+    for c in &candidates {
+        if c.is_file() {
+            return Some(c.clone());
+        }
+    }
+
+    // Check for child .app bundles inside this directory
+    for app in ["RotMG Exalt.app", "RotMGExalt.app", "RotMG Exalt Launcher.app"] {
+        let app_res = p.join(app).join("Contents/Resources/Data/resources.assets");
+        if app_res.is_file() {
+            return Some(app_res);
+        }
+        let prod_res = p.join("Production").join(app).join("Contents/Resources/Data/resources.assets");
+        if prod_res.is_file() {
+            return Some(prod_res);
+        }
+        let realm_prod_res = p.join("RealmOfTheMadGod/Production").join(app).join("Contents/Resources/Data/resources.assets");
+        if realm_prod_res.is_file() {
+            return Some(realm_prod_res);
+        }
+    }
+
+    None
+}
+
 /// Find the default RotMG resources.assets path.
 ///
-/// Checks multiple locations in priority order (newest first):
-/// 1. `%LOCALAPPDATA%\RealmOfTheMadGod\Production\` (current game location since ~2025)
-/// 2. `%USERPROFILE%\Documents\RealmOfTheMadGod\Production\` (legacy location)
+/// Checks multiple locations in priority order:
+/// - Environment variables: `ROTMG_RESOURCES_ASSETS`, `ROTMG_PATH`
+/// - Platform-specific standard installation directories (AppData/Local, Documents, Steam, Applications)
 ///
-/// When both exist, the most recently modified file wins, since the legacy
-/// Documents location may still contain a stale copy.
+/// When multiple exist, the most recently modified file wins.
 pub fn find_resources_assets() -> Option<PathBuf> {
     let mut candidates: Vec<PathBuf> = Vec::new();
 
+    // Check environment variables first
+    if let Ok(env_path) = std::env::var("ROTMG_RESOURCES_ASSETS") {
+        let path = PathBuf::from(env_path);
+        if path.exists() {
+            candidates.push(path);
+        }
+    }
+    if let Ok(env_path) = std::env::var("ROTMG_PATH") {
+        if let Some(path) = resolve_resources_assets_path(&env_path) {
+            candidates.push(path);
+        }
+    }
+
     #[cfg(target_os = "windows")]
     {
-        // New location: AppData\Local (game moved here in a recent update)
+        // 1. New location: AppData\Local (game moved here in a recent update)
         if let Some(local_app_data) = dirs::data_local_dir() {
             let path = local_app_data
                 .join("RealmOfTheMadGod/Production/RotMG Exalt_Data/resources.assets");
@@ -245,9 +309,22 @@ pub fn find_resources_assets() -> Option<PathBuf> {
             }
         }
 
-        // Legacy location: Documents folder
+        // 2. Legacy location: Documents folder
         if let Some(docs) = dirs::document_dir() {
             let path = docs.join("RealmOfTheMadGod/Production/RotMG Exalt_Data/resources.assets");
+            if path.exists() {
+                candidates.push(path);
+            }
+        }
+
+        // 3. Steam on Windows
+        for steam_path in [
+            r"C:\Program Files (x86)\Steam\steamapps\common\Realm of the Mad God Exalt\RotMG Exalt_Data\resources.assets",
+            r"C:\Program Files (x86)\Steam\steamapps\common\Realm of the Mad God Exalt\RotMG Exalt Launcher_Data\resources.assets",
+            r"C:\Program Files\Steam\steamapps\common\Realm of the Mad God Exalt\RotMG Exalt_Data\resources.assets",
+            r"C:\Program Files\Steam\steamapps\common\Realm of the Mad God Exalt\RotMG Exalt Launcher_Data\resources.assets",
+        ] {
+            let path = PathBuf::from(steam_path);
             if path.exists() {
                 candidates.push(path);
             }
@@ -256,10 +333,74 @@ pub fn find_resources_assets() -> Option<PathBuf> {
 
     #[cfg(target_os = "macos")]
     {
+        let app_names = [
+            "RotMG Exalt.app",
+            "RotMGExalt.app",
+            "RotMG Exalt Launcher.app",
+        ];
+
+        // 1. Home directory (~/RealmOfTheMadGod/Production/): standard Deca launcher install
+        if let Some(home) = dirs::home_dir() {
+            let prod = home.join("RealmOfTheMadGod/Production");
+            for app_name in &app_names {
+                let path = prod.join(app_name).join("Contents/Resources/Data/resources.assets");
+                if path.exists() {
+                    candidates.push(path);
+                }
+            }
+
+            // Also check ~/Applications
+            let user_apps = home.join("Applications");
+            for app_name in &app_names {
+                let path = user_apps.join(app_name).join("Contents/Resources/Data/resources.assets");
+                if path.exists() {
+                    candidates.push(path);
+                }
+            }
+        }
+
+        // 2. Documents folder (~/Documents/RealmOfTheMadGod/Production/): legacy/alternative install
         if let Some(docs) = dirs::document_dir() {
-            let path = docs.join("RealmOfTheMadGod/Production/RotMGExalt.app/Contents/Resources/Data/resources.assets");
+            let prod = docs.join("RealmOfTheMadGod/Production");
+            for app_name in &app_names {
+                let path = prod.join(app_name).join("Contents/Resources/Data/resources.assets");
+                if path.exists() {
+                    candidates.push(path);
+                }
+            }
+        }
+
+        // 3. System /Applications
+        let sys_apps = PathBuf::from("/Applications");
+        for app_name in &app_names {
+            let path = sys_apps.join(app_name).join("Contents/Resources/Data/resources.assets");
             if path.exists() {
                 candidates.push(path);
+            }
+        }
+
+        // 4. Steam on macOS (~/Library/Application Support/Steam/...)
+        if let Some(support) = dirs::data_local_dir() {
+            let steam_dirs = [
+                support.join("Steam/steamapps/common/Realm of the Mad God Exalt"),
+                support.join("Steam/steamapps/common/Realm of the Mad God"),
+            ];
+            for steam_dir in &steam_dirs {
+                for app_name in &app_names {
+                    let path = steam_dir.join(app_name).join("Contents/Resources/Data/resources.assets");
+                    if path.exists() {
+                        candidates.push(path);
+                    }
+                }
+            }
+
+            // Also check ~/Library/Application Support/RealmOfTheMadGod/Production
+            let app_support_prod = support.join("RealmOfTheMadGod/Production");
+            for app_name in &app_names {
+                let path = app_support_prod.join(app_name).join("Contents/Resources/Data/resources.assets");
+                if path.exists() {
+                    candidates.push(path);
+                }
             }
         }
     }
@@ -267,6 +408,10 @@ pub fn find_resources_assets() -> Option<PathBuf> {
     if candidates.is_empty() {
         return None;
     }
+
+    // Deduplicate
+    candidates.sort();
+    candidates.dedup();
 
     // If multiple candidates, pick the most recently modified one
     if candidates.len() > 1 {
