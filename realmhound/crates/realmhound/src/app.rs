@@ -2130,6 +2130,7 @@ impl RealmHoundApp {
         let shadcn = self.shadcn.clone();
         let mut open = self.modals.show_capture_error;
         let mut retry = false;
+        let mut close_modal = false;
 
         egui::Area::new(egui::Id::new("capture_error_dialog_host"))
             .fixed_pos(egui::pos2(0.0, 0.0))
@@ -2177,10 +2178,10 @@ impl RealmHoundApp {
                                 }
                                 if shadcn.btn(ui, "Retry Capture").clicked() {
                                     retry = true;
-                                    open = false;
+                                    close_modal = true;
                                 }
                                 if shadcn.btn(ui, "Dismiss").clicked() {
-                                    open = false;
+                                    close_modal = true;
                                 }
                             });
                         });
@@ -2188,6 +2189,9 @@ impl RealmHoundApp {
                 );
             });
 
+        if close_modal {
+            open = false;
+        }
         self.modals.show_capture_error = open;
         if retry {
             self.start_capture();
