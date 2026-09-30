@@ -138,7 +138,16 @@ fn open_in_file_explorer(path: &std::path::Path) {
 }
 
 #[cfg(not(windows))]
-fn open_in_file_explorer(_path: &std::path::Path) {}
+fn open_in_file_explorer(path: &std::path::Path) {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open").arg("-R").arg(path).spawn();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("xdg-open").arg(path).spawn();
+    }
+}
 
 /// Roman-numeral label (I-IV) for an enchantment tier number 1-4.
 fn roman_tier(tier: u8) -> &'static str {
@@ -1260,6 +1269,8 @@ impl RealmHoundApp {
             }
             Err(e) => {
                 tracing::error!("{}", e);
+                self.modals.capture_error_message = Some(e);
+                self.modals.show_capture_error = true;
             }
         }
     }
@@ -1368,6 +1379,15 @@ impl RealmHoundApp {
             unsafe {
                 MessageBoxW(0, msg.as_ptr(), title.as_ptr(), MB_OK | MB_ICONERROR);
             }
+        }
+        #[cfg(not(windows))]
+        {
+            rfd::MessageDialog::new()
+                .set_title("RealmHound")
+                .set_description(format!("Restart failed and RealmHound must close:\n\n{reason}"))
+                .set_level(rfd::MessageLevel::Error)
+                .set_buttons(rfd::MessageButtons::Ok)
+                .show();
         }
         std::process::exit(1);
     }
@@ -2098,6 +2118,73 @@ impl RealmHoundApp {
             });
 
         self.modals.show_changelog = open;
+    }
+
+    /// Render the capture error/permission modal.
+    fn render_capture_error_modal(&mut self, ctx: &egui::Context) {
+        let shadcn = self.shadcn.clone();
+        let mut open = self.modals.show_capture_error;
+        let mut retry = false;
+
+        egui::Area::new(egui::Id::new("capture_error_dialog_host"))
+            .fixed_pos(egui::pos2(0.0, 0.0))
+            .show(ctx, |ui| {
+                shadcn.dialog(
+                    ui,
+                    "capture_error_modal",
+                    &mut open,
+                    "Packet Capture Notice",
+                    540.0,
+                    380.0,
+                    |ui| {
+                        ui.vertical(|ui| {
+                            ui.label(
+                                RichText::new("Could not start packet capture.")
+                                    .strong()
+                                    .color(Color32::from_rgb(255, 100, 100)),
+                            );
+                            ui.add_space(8.0);
+
+                            if let Some(ref msg) = self.modals.capture_error_message {
+                                egui::ScrollArea::vertical()
+                                    .max_height(240.0)
+                                    .show(ui, |ui| {
+                                        ui.label(msg);
+                                    });
+                            } else {
+                                ui.label("An unknown error occurred while initializing packet capture.");
+                            }
+
+                            ui.add_space(12.0);
+                            ui.separator();
+                            ui.add_space(8.0);
+
+                            ui.horizontal(|ui| {
+                                #[cfg(target_os = "macos")]
+                                {
+                                    if shadcn.btn(ui, "Copy Brew Command").clicked() {
+                                        ui.output_mut(|o| {
+                                            o.copied_text = "brew install --cask wireshark-chmodbpf".to_string()
+                                        });
+                                    }
+                                }
+                                if shadcn.btn(ui, "Retry Capture").clicked() {
+                                    retry = true;
+                                    open = false;
+                                }
+                                if shadcn.btn(ui, "Dismiss").clicked() {
+                                    open = false;
+                                }
+                            });
+                        });
+                    },
+                );
+            });
+
+        self.modals.show_capture_error = open;
+        if retry {
+            self.start_capture();
+        }
     }
 
     /// Render the Settings modal as a fixed-size shadcn dialog.
@@ -9115,6 +9202,11 @@ impl eframe::App for RealmHoundApp {
         // Changelog window (modal)
         if self.modals.show_changelog {
             self.render_changelog_window(ctx);
+        }
+
+        // Capture error / permission modal
+        if self.modals.show_capture_error {
+            self.render_capture_error_modal(ctx);
         }
 
         // Exit confirmation dialog (modal)

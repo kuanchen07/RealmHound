@@ -9,6 +9,16 @@ pub enum CaptureError {
     #[error("Npcap is not installed. Please install from https://npcap.com/")]
     NpcapNotInstalled,
 
+    /// BPF packet capture permission denied on macOS
+    #[error(
+        "Packet capture permission denied for /dev/bpf*.\n\
+         macOS requires root privileges or membership in the access_bpf group to capture packets.\n\n\
+         To enable capture on macOS:\n\
+         - Option 1 (Recommended): Install Wireshark's ChmodBPF package: brew install --cask wireshark-chmodbpf\n\
+         - Option 2: Run RealmHound with sudo: sudo ./RealmHound"
+    )]
+    BpfPermissionDenied,
+
     /// No network interfaces found
     #[error("No network interfaces found")]
     NoInterfaces,

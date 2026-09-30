@@ -95,3 +95,52 @@ jobs:
         working-directory: realmhound
         # Some migration tests share process-global state and require serial execution.
         run: cargo test --locked -p realmhound-core -- --test-threads=1
+
+  macos:
+    name: macOS build & tests
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            realmhound/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Check workspace
+        working-directory: realmhound
+        run: cargo check --locked
+
+      - name: Build workspace
+        working-directory: realmhound
+        run: cargo build --locked
+
+      - name: Run core tests
+        working-directory: realmhound
+        # Some migration tests share process-global state and require serial execution.
+        run: cargo test --locked -p realmhound-core -- --test-threads=1
+
+      - name: Package macOS DMG
+        run: |
+          chmod +x tools/package-macos.sh
+          ./tools/package-macos.sh
+
+      - name: Upload macOS DMG Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RealmHound-macOS
+          path: dist/*.dmg
+          if-no-files-found: error
+
+
