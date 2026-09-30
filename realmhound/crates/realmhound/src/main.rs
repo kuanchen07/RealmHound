@@ -20,7 +20,6 @@ use tracing_subscriber::{filter::Targets, fmt, layer::SubscriberExt, util::Subsc
 
 #[cfg(windows)]
 mod power_throttling;
-#[cfg(windows)]
 mod single_instance;
 
 mod app;
@@ -79,7 +78,6 @@ fn main() -> Result<()> {
 
     // Ensure only one instance of RealmHound runs at a time.
     // The guard must live for the entire program duration.
-    #[cfg(windows)]
     let _single_instance = single_instance::acquire_or_exit();
 
     // Initialize logging

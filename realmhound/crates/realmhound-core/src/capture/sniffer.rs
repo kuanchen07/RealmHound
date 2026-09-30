@@ -64,9 +64,16 @@ impl Sniffer {
             .buffer_size(config.buffer_size)
             .promisc(config.promiscuous)
             .open()
-            .map_err(|e| CaptureError::InterfaceOpenFailed {
-                name: interface.name.clone(),
-                reason: e.to_string(),
+            .map_err(|e| {
+                let reason = e.to_string();
+                #[cfg(target_os = "macos")]
+                if reason.contains("Permission denied") || reason.contains("/dev/bpf") {
+                    return CaptureError::BpfPermissionDenied;
+                }
+                CaptureError::InterfaceOpenFailed {
+                    name: interface.name.clone(),
+                    reason,
+                }
             })?;
 
         let mut sniffer = Self {

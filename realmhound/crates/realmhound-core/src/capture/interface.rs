@@ -22,9 +22,16 @@ impl NetworkInterface {
     /// Npcap is not installed.
     pub fn list_all() -> Result<Vec<NetworkInterface>, CaptureError> {
         let devices = pcap::Device::list().map_err(|e| {
-            if e.to_string().contains("not have permission")
-                || e.to_string().contains("No such file")
+            let msg = e.to_string();
+            #[cfg(target_os = "macos")]
+            if msg.contains("not have permission")
+                || msg.contains("Permission denied")
+                || msg.contains("/dev/bpf")
             {
+                return CaptureError::BpfPermissionDenied;
+            }
+
+            if msg.contains("not have permission") || msg.contains("No such file") {
                 CaptureError::NpcapNotInstalled
             } else {
                 CaptureError::PcapError(e)

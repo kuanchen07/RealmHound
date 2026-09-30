@@ -77,6 +77,10 @@ pub struct ModalState {
     pub show_combat_clear_confirm: bool,
     /// Whether to show the full changelog window.
     pub show_changelog: bool,
+    /// Whether to show the packet capture error/permission modal.
+    pub show_capture_error: bool,
+    /// Captured error details or instructions to show in the modal.
+    pub capture_error_message: Option<String>,
 }
 
 #[allow(dead_code)]
@@ -92,7 +96,11 @@ impl ModalState {
     /// while a modal is displayed. Note: the update details panel is
     /// managed separately by `UpdatePanel` and must be checked independently.
     pub fn any_blocking_open(&self) -> bool {
-        self.show_about || self.show_exit_confirm || self.show_settings || self.show_changelog
+        self.show_about
+            || self.show_exit_confirm
+            || self.show_settings
+            || self.show_changelog
+            || self.show_capture_error
     }
 
     /// Close all modals and reset transient state.
@@ -106,6 +114,8 @@ impl ModalState {
         self.show_account_reset_confirm = false;
         self.show_combat_clear_confirm = false;
         self.show_changelog = false;
+        self.show_capture_error = false;
+        self.capture_error_message = None;
         self.settings_category = SettingsCategory::default();
     }
 
