@@ -43,9 +43,12 @@ echo "==> Building RealmHound v$VERSION ($TARGET)..."
 cd "$REALMHOUND_DIR"
 cargo build --release --target "$TARGET" -p RealmHound
 
-BINARY_PATH="$REALMHOUND_DIR/target/$TARGET/release/RealmHound"
-if [ ! -f "$BINARY_PATH" ]; then
-    echo "Error: Compiled binary not found at $BINARY_PATH"
+if [ -f "$REALMHOUND_DIR/target/$TARGET/release/RealmHound" ]; then
+    BINARY_PATH="$REALMHOUND_DIR/target/$TARGET/release/RealmHound"
+elif [ -f "$REALMHOUND_DIR/target/release/RealmHound" ]; then
+    BINARY_PATH="$REALMHOUND_DIR/target/release/RealmHound"
+else
+    echo "Error: Compiled binary not found at $REALMHOUND_DIR/target/$TARGET/release/RealmHound"
     exit 1
 fi
 

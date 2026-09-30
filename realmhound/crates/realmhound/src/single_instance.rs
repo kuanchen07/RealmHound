@@ -6,9 +6,11 @@
 //! exit.
 
 #[cfg(windows)]
+#[allow(unused_imports)]
 pub use windows_impl::{acquire_or_exit, SingleInstanceGuard};
 
 #[cfg(not(windows))]
+#[allow(unused_imports)]
 pub use unix_impl::{acquire_or_exit, SingleInstanceGuard};
 
 #[cfg(windows)]

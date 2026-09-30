@@ -2170,10 +2170,9 @@ impl RealmHoundApp {
                                 #[cfg(target_os = "macos")]
                                 {
                                     if shadcn.btn(ui, "Copy Brew Command").clicked() {
-                                        ui.output_mut(|o| {
-                                            o.copied_text =
-                                                "brew install --cask wireshark-chmodbpf".to_string()
-                                        });
+                                        ctx.copy_text(
+                                            "brew install --cask wireshark-chmodbpf".to_string(),
+                                        );
                                     }
                                 }
                                 if shadcn.btn(ui, "Retry Capture").clicked() {
